@@ -2,6 +2,10 @@ import React, { createContext, useCallback, useState, useContext, useEffect, use
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../services/api';
 import { Alert } from 'react-native';
+import { database } from '../databases';
+import { UserModel } from '../databases/model/userModel';
+import NetInfo from '@react-native-community/netinfo';
+import { SalesModel } from '../databases/model/saleModel';
 
 
 interface User {
@@ -42,6 +46,16 @@ const AuthProvider: React.FC = ({ children }: AuthContextProviderProps) => {
 
   useEffect(() => {
     async function loadStorageData(): Promise<void> {
+      const userCollection = database.get<UserModel>('users')
+      const response = await userCollection.query().fetch();
+
+      const salesCollection = database.get<SalesModel>('sales')
+      const res = await salesCollection.query().fetch();
+
+      res.filter((s) => s._raw?.sync !== true).map((sale) => {
+        console.log("Vendas offline", sale._raw)
+      })
+
 
       const user = await AsyncStorage.getItem('@SisVendas:user');
       const access_token = await AsyncStorage.getItem('@SisVendas:access_token');
@@ -74,8 +88,19 @@ const AuthProvider: React.FC = ({ children }: AuthContextProviderProps) => {
       api.get("/auth/me").then(async (res) => {
         setUser(res.data)
         await AsyncStorage.setItem('@SisVendas:user', JSON.stringify(res.data));
+        const userCollection = database.get<UserModel>('users');
+        await database.write(async () => {
+          await userCollection.create((newUser) => {
+            newUser.user_id = res.data.id;
+            newUser.name = res.data.name;
+            newUser.email = res.data.email;
+            newUser.profile = res.data.profile;
+            newUser.board_id = res.data.board_unit.board_id;
+            newUser.unit_id = res.data.board_unit.unit_id;
+            newUser.token = access_token
+          })
+        })
       })
-
 
       setLoading(false);
     }).catch(e => {

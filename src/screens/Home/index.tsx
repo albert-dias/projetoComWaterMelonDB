@@ -38,12 +38,17 @@ import { DataSalesProps, LocationProps } from '../../@types/interfaces';
 import { CardTransaction } from '../../components/CardTransaction';
 import { format } from 'date-fns';
 import ptBR from 'date-fns/locale/pt-BR';
+import { database } from '../../databases';
+import { SalesModel } from '../../databases/model/saleModel';
+import { useNetInfo } from '@react-native-community/netinfo';
+import { synchronize } from '@nozbe/watermelondb/sync'
 
 export function Home() {
   const [modalVisible, setModalVisible] = useState(false);
   const [valor, setValor] = useState('');
   const [loading, setLoading] = useState(true);
   const { user, signOut } = useAuth();
+  const netInfo = useNetInfo()
 
   const [location, setLocation] = useState<LocationProps>(null);
   const [errorMsg, setErrorMsg] = useState(null);
@@ -64,7 +69,6 @@ export function Home() {
         end_date: `${year}-${month}-${lastDay}`
       }
     }).then(res => {
-      console.log(res.data)
       setMySales(res.data)
     }).finally(() => setLoading(false))
   }
@@ -81,8 +85,10 @@ export function Home() {
       let location = await Location.getCurrentPositionAsync({});
       setLocation(location);
     })();
-    loadData()
+    loadData();
   }, []);
+
+  console.log("status conexao", netInfo.isConnected)
 
   const sales = useMemo(() => {
     if (!loading && mySales?.sales.length > 0) {
@@ -103,23 +109,40 @@ export function Home() {
   const handleSale = useCallback(async () => {
     Keyboard.dismiss()
     try {
-      await api.post("/insert-sale", {
-        latitude: `${location.coords.latitude}`,
-        longitude: `${location.coords.longitude}`,
-        sale_value: Number(valor.replace(',', '.'))
-      }).then(async (res) => {
-        if (res.status === 200) {
-          await loadData()
+      if (netInfo.isConnected) {
+        await api.post("/insert-sale", {
+          latitude: `${location.coords.latitude}`,
+          longitude: `${location.coords.longitude}`,
+          sale_value: Number(valor.replace(',', '.'))
+        }).then(async (res) => {
+          if (res.status === 200) {
+            await loadData()
+            Alert.alert("Parabéns", "Venda salva com sucesso!")
+            setModalVisible(false)
+          }
+        }).finally(() => {
+          setValor('')
+        })
+      } else {
+        await database.write(async () => {
+          await database.get<SalesModel>("sales").create(data => {
+            data.latitude = `${location.coords.latitude}`;
+            data.longitude = `${location.coords.longitude}`;
+            data.sale_value = Number(valor.replace(',', '.'));
+            data.sync = false
+          })
+        }).finally(() => {
           Alert.alert("Parabéns", "Venda salva com sucesso!")
           setModalVisible(false)
-        }
-      }).finally(() => {
-        setValor('')
-      })
+          setValor('')
+        })
+      }
+
+
     } catch (err) {
       console.error(err.response.data.message);
     }
-  }, [location, valor])
+  }, [location, valor]);
 
   return (
     <Container>
